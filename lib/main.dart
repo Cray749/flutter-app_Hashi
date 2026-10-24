@@ -2,10 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import 'cabin.dart';
-import 'cards.dart';
 import 'content.dart';
-import 'decks.dart';
+import 'hubs.dart';
+import 'inflight.dart';
 import 'kit.dart';
 import 'languages.dart';
 import 'overlays.dart';
@@ -13,7 +12,6 @@ import 'preflight.dart';
 import 'repo.dart';
 import 'session.dart';
 import 'settings.dart';
-import 'sign.dart';
 import 'theme.dart';
 
 /// Lets the cabin put announcements and checks in front of the passenger on whatever screen they are on.
@@ -89,6 +87,29 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
     return s;
   }
 
+  /// The in-flight screens need the seat from the booking, so without one the passenger is sent to their booking first.
+  Future<void> openInFlight() async {
+    final p = profile!;
+    final r = repo!;
+    if (p.seat.isEmpty) {
+      final open = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          icon: const Icon(Icons.event_seat_rounded, color: ai, size: 36),
+          title: const Text('Your seat comes from your booking'),
+          content: const Text('Sign in under "Before flight" to load your booking. Speaking and translating work without it.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Not now')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Open my booking')),
+          ],
+        ),
+      );
+      if (open == true && mounted) go(PreflightScreen(profile: p, repo: r));
+      return;
+    }
+    go(InFlightScreen(session: ensureSession(), repo: r));
+  }
+
   @override
   void dispose() {
     overlays.detach();
@@ -114,12 +135,9 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
     final trip = r.trip;
 
     final stops = <_Stop>[
-      _Stop('一', Icons.event_available_rounded, 'Before you fly', 'Booking, preferences, language kit', () => go(PreflightScreen(profile: p, repo: r)), phase: ('出発前', 'Before the flight')),
-      _Stop('二', Icons.luggage_rounded, 'At the airport', 'Cards for the desk, security and the gate', () => go(DeckScreen(deck: Deck.before, profile: p))),
-      _Stop('三', Icons.flight_rounded, 'On the aircraft', 'Join the cabin network and talk to the crew', () => go(CabinScreen(profile: p, repo: r, ensureSession: ensureSession)), phase: ('機内', 'In the air')),
-      _Stop('四', Icons.touch_app_rounded, 'On the flight', 'Tap what you need, the crew see it in Japanese', () => go(DeckScreen(deck: Deck.flight, profile: p, session: p.seat.isEmpty ? null : ensureSession()))),
-      _Stop('五', Icons.photo_camera_rounded, 'Read a sign', 'Camera to your language, no signal needed', () => go(SignScreen(profile: p)), phase: ('到着後', 'After landing'), tint: kinSoft),
-      _Stop('六', Icons.record_voice_over_rounded, 'Show to staff', 'Japanese cards with sound', () => go(DeckScreen(deck: Deck.staff, profile: p))),
+      _Stop('一', Icons.luggage_rounded, 'Before flight', 'Booking, language kit, cards for the airport, speak', () => go(BeforeHub(profile: p, repo: r)), kanji: '出発前'),
+      _Stop('二', Icons.flight_rounded, 'In flight', 'Talk to the crew, picture cards, speak and translate', openInFlight, kanji: '機内'),
+      _Stop('三', Icons.travel_explore_rounded, 'After flight', 'Read signs, show cards to staff, speak and translate', () => go(AfterHub(profile: p)), kanji: '到着後', tint: kinSoft),
     ];
 
     return Scaffold(
@@ -164,9 +182,9 @@ class _Stop {
   final String title;
   final String subtitle;
   final VoidCallback onTap;
-  final (String, String)? phase;
+  final String kanji;
   final Color tint;
-  _Stop(this.numeral, this.icon, this.title, this.subtitle, this.onTap, {this.phase, this.tint = Colors.white});
+  _Stop(this.numeral, this.icon, this.title, this.subtitle, this.onTap, {required this.kanji, this.tint = Colors.white});
 }
 
 class _Chip extends StatelessWidget {
@@ -191,15 +209,6 @@ class _StopTile extends StatelessWidget {
     return Entrance(
       index: index,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        if (stop.phase != null)
-          Padding(
-            padding: EdgeInsets.only(left: 58, top: index == 0 ? 0 : 14, bottom: 8),
-            child: Row(children: [
-              Text(stop.phase!.$1, style: const TextStyle(fontFamily: serifFont, fontSize: 22, fontWeight: FontWeight.w900, color: shu, letterSpacing: 2)),
-              const SizedBox(width: 10),
-              Text(stop.phase!.$2.toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: sumiSoft, letterSpacing: 1.4)),
-            ]),
-          ),
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
@@ -209,13 +218,14 @@ class _StopTile extends StatelessWidget {
               child: PaperCard(
                 color: stop.tint,
                 onTap: stop.onTap,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
                 child: Row(children: [
-                  Icon(stop.icon, color: ai, size: 30),
+                  Icon(stop.icon, color: ai, size: 34),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(stop.title, style: const TextStyle(fontFamily: serifFont, fontSize: 20, fontWeight: FontWeight.w800, color: aiDeep)),
+                      Text(stop.kanji, style: const TextStyle(fontFamily: serifFont, fontSize: 14, fontWeight: FontWeight.w900, color: shu, letterSpacing: 2)),
+                      Text(stop.title, style: const TextStyle(fontFamily: serifFont, fontSize: 24, fontWeight: FontWeight.w800, color: aiDeep)),
                       const SizedBox(height: 2),
                       Text(stop.subtitle, style: const TextStyle(fontSize: 15, color: sumiSoft, height: 1.3)),
                     ]),

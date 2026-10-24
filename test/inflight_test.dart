@@ -2,7 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hashi_mobile/cabin_link.dart';
 import 'package:hashi_mobile/content.dart';
+import 'package:hashi_mobile/discover.dart';
 import 'package:hashi_mobile/decks.dart';
 import 'package:hashi_mobile/inflight.dart';
 import 'package:hashi_mobile/kit.dart';
@@ -11,6 +13,7 @@ import 'package:hashi_mobile/overlays.dart';
 import 'package:hashi_mobile/session.dart';
 import 'package:hashi_mobile/talk.dart';
 import 'package:hashi_mobile/theme.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'helpers.dart';
 
@@ -39,7 +42,10 @@ final sound = SoundLog();
 
 void main() {
   setUpAll(loadContentForTests);
-  setUp(sound.install);
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    sound.install();
+  });
   tearDown(() {
     sound.restore();
     sound.clips.clear();
@@ -51,7 +57,7 @@ void main() {
       tall(t);
       final (session, cabin) = online ? await onlineSession(t) : (CabinSession.forProfile(Profile(lang: 'hi', seat: '24C')), FakeCabin());
       if (!online) addTearDown(session.dispose);
-      await t.pumpWidget(MaterialApp(theme: buildTheme(), home: InFlightScreen(session: session, cards: cards)));
+      await t.pumpWidget(MaterialApp(theme: buildTheme(), home: InFlightScreen(session: session, cards: cards, autoJoin: false)));
       await settle(t);
       return (session, cabin);
     }
@@ -66,9 +72,10 @@ void main() {
       session.dispose();
     });
 
-    testWidgets('not connected yet: says so and tells where to join', (t) async {
+    testWidgets('not connected yet: says so, and that speaking still works with no connection', (t) async {
       await open(t, online: false);
       expect(find.text('Not connected'), findsOneWidget);
+      expect(find.textContaining('still work with no connection'), findsWidgets);
     });
 
     testWidgets('the help button asks once, in the passenger\'s language, and sends an urgent request only on yes', (t) async {
@@ -153,11 +160,84 @@ void main() {
       expect(find.textContaining('No requests yet'), findsOneWidget);
     });
 
-    testWidgets('has a way to the picture cards and to the conversation', (t) async {
+    testWidgets("has Speak and translate first, then picture tiles in the passenger's language, and a way to type to the crew", (t) async {
       await open(t);
-      await t.tap(find.text('Talk to the crew'));
+      expect(find.text('Speak & translate'), findsOneWidget);
+      expect(find.text('पानी चाहिए'), findsOneWidget); // the water tile
+      await t.tap(find.text('Type to the crew'));
       await settle(t);
       expect(find.byType(TalkScreen), findsOneWidget);
+    });
+
+    testWidgets('a picture tile opens its card, ready to send', (t) async {
+      final (_, cabin) = await open(t);
+      await t.tap(find.text('पानी चाहिए'));
+      await settle(t);
+      await t.tap(find.text('Send to crew · 乗務員に送る'));
+      await settle(t);
+      expect(cabin.lastInbox.last, {'t': 'request', 'intent': 'water', 'via': 'tap'});
+    });
+
+    testWidgets('the Speak button opens speak and translate', (t) async {
+      await open(t);
+      await t.tap(find.text('Speak & translate'));
+      await settle(t);
+      expect(find.text('I speak'), findsOneWidget);
+      expect(find.text('They speak'), findsOneWidget);
+    });
+
+    group('finding the cabin by itself', () {
+      Future<(CabinSession, FakeCabin)> openAuto(WidgetTester t, Future<CabinConnection> Function(List<String>) connector) async {
+        tall(t);
+        final cabin = FakeCabin();
+        final session = CabinSession.forProfile(Profile(lang: 'hi', seat: '24C'), makeLink: (store) => CabinLink(store, factory: cabin.open, pingEvery: Duration.zero));
+        addTearDown(session.dispose);
+        await t.pumpWidget(MaterialApp(theme: buildTheme(), home: InFlightScreen(session: session, cards: cards, connector: connector)));
+        await settle(t);
+        return (session, cabin);
+      }
+
+      testWidgets('when the cabin is found it opens the live line without anyone typing an address', (t) async {
+        final asked = <List<String>>[];
+        final (session, cabin) = await openAuto(t, (hosts) async {
+          asked.add(hosts);
+          return const CabinConnection(CabinState.ready, baseUrl: 'http://192.168.137.1:8000', seat: '24C', flight: 'JL740');
+        });
+        expect(asked.first, contains('http://hashi-cabin.local:8000'));
+        expect(cabin.uris.single.toString(), 'ws://192.168.137.1:8000/ws/passenger?seat=24C');
+        cabin.welcome();
+        await settle(t);
+        expect(find.text('Connected to the crew'), findsOneWidget);
+        expect(session.profile.server, 'http://192.168.137.1:8000');
+      });
+
+      testWidgets('when it is not found it says so, and tries again every few seconds', (t) async {
+        var calls = 0;
+        final (_, cabin) = await openAuto(t, (hosts) async {
+          calls++;
+          return calls < 3 ? const CabinConnection(CabinState.notFound) : const CabinConnection(CabinState.ready, baseUrl: 'http://192.168.137.1:8000', seat: '24C');
+        });
+        expect(find.text('Cabin not found yet'), findsOneWidget);
+        expect(cabin.connections, isEmpty);
+        await t.pump(const Duration(seconds: 6));
+        await t.pump(const Duration(seconds: 6));
+        await t.pump();
+        expect(calls, 3);
+        expect(cabin.connections.length, 1);
+      });
+
+      testWidgets('once the line is up it stops looking', (t) async {
+        var calls = 0;
+        final (_, cabin) = await openAuto(t, (hosts) async {
+          calls++;
+          return const CabinConnection(CabinState.ready, baseUrl: 'http://192.168.137.1:8000', seat: '24C');
+        });
+        cabin.welcome();
+        await settle(t);
+        final before = calls;
+        await t.pump(const Duration(seconds: 20));
+        expect(calls, before);
+      });
     });
   });
 

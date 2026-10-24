@@ -9,6 +9,7 @@ import 'kit.dart';
 import 'languages.dart';
 import 'session.dart';
 import 'theme.dart';
+import 'tiles.dart';
 
 final _tts = FlutterTts();
 
@@ -39,29 +40,64 @@ class DeckScreen extends StatefulWidget {
   final List<HashiCard>? cards;
   /// The live line to the crew; flight cards are sent through it.
   final CabinSession? session;
-  const DeckScreen({super.key, required this.deck, required this.profile, this.cards, this.session});
+  /// Open already filtered to one group (the hubs show the groups as tiles).
+  final String? initialGroup;
+  const DeckScreen({super.key, required this.deck, required this.profile, this.cards, this.session, this.initialGroup});
 
   @override
   State<DeckScreen> createState() => _DeckScreenState();
 }
 
+/// Translated tile labels, kept for the life of the app so reopening a deck is instant.
+final Map<String, String> _labelCache = {};
+
 class _DeckScreenState extends State<DeckScreen> {
   List<HashiCard>? cards;
-  String? group; // null = all
+  late String? group = widget.initialGroup; // null = all
 
   @override
   void initState() {
     super.initState();
     if (widget.cards != null) {
       cards = widget.cards;
+      _translateLabels();
     } else {
       cardsFor(widget.deck).then((c) {
-        if (mounted) setState(() => cards = c);
+        if (!mounted) return;
+        setState(() => cards = c);
+        _translateLabels();
       });
     }
   }
 
-  Color spineFor(HashiCard c) => c.urgency >= 3 ? shu : (c.urgency == 2 ? kin : ai);
+  /// What the tile says: the passenger's own language. Flight cards ship with every language; the other decks are
+  /// translated on the phone in the background (English until that is done, or when the language has no phone model).
+  String labelFor(HashiCard c) {
+    final lang = widget.profile.lang;
+    if (lang == 'en' || lang == 'ja') return c.en;
+    return c.labels[lang] ?? _mine[c.id] ?? c.en;
+  }
+
+  final Map<String, String> _mine = {};
+
+  Future<void> _translateLabels() async {
+    final l = langByCode(widget.profile.lang);
+    final list = cards;
+    if (list == null || widget.deck == Deck.flight || l.ml == null || l.code == 'en') return;
+    final key = '${l.code}|';
+    final cached = {for (final c in list) if (_labelCache['$key${c.id}'] != null) c.id: _labelCache['$key${c.id}']!};
+    if (cached.length == list.length) {
+      setState(() => _mine.addAll(cached));
+      return;
+    }
+    final done = await Kit.translateMany([for (final c in list) c.en], TranslateLanguage.english, l.ml!);
+    if (!mounted) return;
+    for (final c in list) {
+      final t = done[c.en];
+      if (t != null) _labelCache['$key${c.id}'] = t;
+    }
+    setState(() => _mine.addAll({for (final c in list) if (done[c.en] != null) c.id: done[c.en]!}));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -69,7 +105,6 @@ class _DeckScreenState extends State<DeckScreen> {
     final groups = groupsFor(widget.deck);
     final all = cards;
     final shown = all == null ? <HashiCard>[] : [for (final c in all) if (group == null || c.group == group) c];
-    final lang = widget.profile.lang;
     return WashiPage(
       title: info.title,
       kanji: info.kanji,
@@ -95,31 +130,17 @@ class _DeckScreenState extends State<DeckScreen> {
         ),
         const SizedBox(height: 12),
         if (all == null) const Padding(padding: EdgeInsets.all(30), child: Center(child: CircularProgressIndicator(color: ai))),
-        for (var i = 0; i < shown.length; i++)
-          Entrance(
-            key: ValueKey('${widget.deck.name}-${shown[i].id}'),
-            index: i,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: PaperCard(
-                spine: spineFor(shown[i]),
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FullCard(card: shown[i], profile: widget.profile, deck: widget.deck, session: widget.session))),
-                child: Row(children: [
-                  Container(width: 48, height: 48, decoration: BoxDecoration(color: washi, shape: BoxShape.circle, border: Border.all(color: ai.withValues(alpha: 0.15))), child: Icon(shown[i].icon, color: ai, size: 26)),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      if (shown[i].urgency >= 3) const Padding(padding: EdgeInsets.only(bottom: 2), child: Text('URGENT · 緊急', style: TextStyle(color: shu, fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 1))),
-                      Text(shown[i].ja, style: const TextStyle(fontFamily: serifFont, fontSize: 20, fontWeight: FontWeight.w800, color: aiDeep, height: 1.25)),
-                      const SizedBox(height: 3),
-                      Text(shown[i].labels[lang] != null && lang != 'en' && lang != 'ja' ? shown[i].labels[lang]! : shown[i].en, style: const TextStyle(fontSize: 15, color: sumiSoft, height: 1.3)),
-                    ]),
-                  ),
-                  const Icon(Icons.open_in_full_rounded, color: sumiSoft, size: 20),
-                ]),
-              ),
+        TileGrid(tiles: [
+          for (final c in shown)
+            CardTile(
+              key: ValueKey('${widget.deck.name}-${c.id}'),
+              icon: c.icon,
+              label: labelFor(c),
+              badge: c.urgency >= 3 ? 'URGENT · 緊急' : null,
+              style: tileStyleFor(widget.deck, c.group),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FullCard(card: c, profile: widget.profile, deck: widget.deck, session: widget.session))),
             ),
-          ),
+        ]),
         if (all != null && shown.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('No cards in this group.')),
       ],
     );

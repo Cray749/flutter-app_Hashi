@@ -12,6 +12,7 @@ import 'package:hashi_mobile/repo.dart';
 import 'package:hashi_mobile/session.dart';
 import 'package:hashi_mobile/settings.dart';
 import 'package:hashi_mobile/theme.dart';
+import 'package:hashi_mobile/tiles.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -59,17 +60,15 @@ void main() {
   });
 
   group('home', () {
-    testWidgets('shows the journey in three phases with six steps, and a settings button', (t) async {
+    testWidgets('shows just three categories: before, in and after the flight, and a settings button', (t) async {
       SharedPreferences.setMockInitialValues({'lang': 'hi', 'seat': '24C'});
       await t.pumpWidget(const HashiApp());
       await settle(t);
-      for (final text in ['出発前', '機内', 'Before you fly', 'At the airport', 'On the aircraft', 'On the flight']) {
-        expect(find.text(text), findsWidgets, reason: text);
+      for (final text in ['出発前', '機内', '到着後', 'Before flight', 'In flight', 'After flight']) {
+        expect(find.text(text), findsOneWidget, reason: text);
       }
-      await t.drag(find.byType(ListView).first, const Offset(0, -500));
-      await settle(t);
-      for (final text in ['到着後', 'Read a sign', 'Show to staff']) {
-        expect(find.text(text), findsWidgets, reason: text);
+      for (final gone in ['At the airport', 'On the aircraft', 'Show to staff', 'Read a sign']) {
+        expect(find.text(gone), findsNothing, reason: '$gone is inside a category now');
       }
       expect(find.byTooltip('Settings'), findsOneWidget);
       expect(find.textContaining('Seat 24C'), findsOneWidget);
@@ -87,13 +86,42 @@ void main() {
       expect(find.text('My settings'), findsOneWidget);
     });
 
-    testWidgets('a step opens its deck', (t) async {
+    testWidgets('each category has Speak and translate first, then its own tiles', (t) async {
+      SharedPreferences.setMockInitialValues({'lang': 'hi', 'seat': '24C'});
+      await t.pumpWidget(const HashiApp());
+      await settle(t);
+      await t.tap(find.text('Before flight'));
+      await settle(t);
+      expect(find.text('Speak & translate'), findsOneWidget);
+      expect(find.textContaining('Help at the airport'), findsWidgets);
+      await t.pageBack();
+      await settle(t);
+      await t.tap(find.text('After flight'));
+      await settle(t);
+      expect(find.text('Speak & translate'), findsOneWidget);
+      expect(find.textContaining('Read a sign'), findsWidgets);
+      expect(find.textContaining('Arriving'), findsWidgets);
+    });
+
+    testWidgets('a group tile opens the cards of that group', (t) async {
+      SharedPreferences.setMockInitialValues({'lang': 'en', 'seat': '24C'});
+      await t.pumpWidget(const HashiApp());
+      await settle(t);
+      await t.tap(find.text('Before flight'));
+      await settle(t);
+      await t.tap(find.textContaining('My meal').first);
+      await settle(t);
+      expect(find.text('I would like a vegetarian meal.'), findsOneWidget);
+      expect(find.text('I need a wheelchair at the airport.'), findsNothing);
+    });
+
+    testWidgets('In flight without a booking asks to open the booking first', (t) async {
       SharedPreferences.setMockInitialValues({'lang': 'hi'});
       await t.pumpWidget(const HashiApp());
       await settle(t);
-      await t.tap(find.text('At the airport'));
+      await t.tap(find.text('In flight'));
       await settle(t);
-      expect(find.text('I need a wheelchair at the airport.'), findsWidgets);
+      expect(find.text('Your seat comes from your booking'), findsOneWidget);
     });
 
     testWidgets('calm mode shows no drifting petals', (t) async {
@@ -122,12 +150,24 @@ void main() {
       await settle(t);
     }
 
-    testWidgets('lists every card with Japanese, and flags urgent ones in words', (t) async {
+    testWidgets("shows every card as a tile in the passenger's own language, and flags urgent ones in words", (t) async {
       await showDeck(t);
-      expect(find.text('お水をお願いします'), findsOneWidget);
-      expect(find.text('胸が痛いです'), findsOneWidget);
+      expect(find.text('पानी चाहिए'), findsOneWidget);
+      expect(find.text('कंबल चाहिए'), findsOneWidget);
+      expect(find.text('सीने में दर्द है'), findsOneWidget);
       expect(find.text('URGENT · 緊急'), findsOneWidget);
-      expect(find.text('पानी चाहिए'), findsOneWidget, reason: 'the passenger\'s own language is shown under the Japanese');
+      expect(find.byType(CardTile), findsNWidgets(3));
+    });
+
+    testWidgets('tiles are two to a row and big enough for older hands', (t) async {
+      await showDeck(t);
+      final a = t.getRect(find.byType(CardTile).at(0));
+      final b = t.getRect(find.byType(CardTile).at(1));
+      final c = t.getRect(find.byType(CardTile).at(2));
+      expect((a.top - b.top).abs(), lessThan(1), reason: 'first two share a row');
+      expect(c.top, greaterThan(a.bottom));
+      expect(a.height, greaterThanOrEqualTo(tileHeight));
+      expect(a.width, greaterThanOrEqualTo(150));
     });
 
     testWidgets('a group filter shows only that group, and All brings everything back', (t) async {
@@ -138,21 +178,22 @@ void main() {
       await t.pump();
       await t.tap(find.textContaining('Comfort'));
       await settle(t);
-      expect(find.text('毛布をお願いします'), findsOneWidget);
-      expect(find.text('お水をお願いします'), findsNothing);
+      expect(find.text('कंबल चाहिए'), findsOneWidget);
+      expect(find.text('पानी चाहिए'), findsNothing);
       await t.dragUntilVisible(find.text('All'), find.byType(ListView).at(1), const Offset(200, 0));
       await t.ensureVisible(find.text('All'));
       await t.pump();
       await t.tap(find.text('All'));
       await settle(t);
-      expect(find.text('お水をお願いします'), findsOneWidget);
+      expect(find.text('पानी चाहिए'), findsOneWidget);
     });
 
     testWidgets('tapping a card opens it full screen', (t) async {
       await showDeck(t);
-      await t.tap(find.text('お水をお願いします'));
+      await t.tap(find.text('पानी चाहिए'));
       await settle(t);
       expect(find.text('Send to crew · 乗務員に送る'), findsOneWidget);
+      expect(find.text('お水をお願いします'), findsWidgets, reason: 'the full card shows the Japanese');
     });
   });
 

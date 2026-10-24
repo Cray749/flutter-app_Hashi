@@ -1,12 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'cabin.dart';
 import 'cards.dart';
 import 'content.dart';
 import 'decks.dart';
+import 'discover.dart';
+import 'hubs.dart';
 import 'protocol.dart';
+import 'repo.dart';
 import 'session.dart';
 import 'talk.dart';
 import 'theme.dart';
+import 'tiles.dart';
 
 /// The in-flight home: how the line to the crew is, the big help button, the requests in progress with the crew's
 /// replies, and the doors to the cards and the conversation. Everything here is native; nothing opens in a browser.
@@ -14,7 +21,12 @@ class InFlightScreen extends StatefulWidget {
   final CabinSession session;
   /// Tests can pass the cards directly instead of loading the bundled file.
   final List<HashiCard>? cards;
-  const InFlightScreen({super.key, required this.session, this.cards});
+  /// Used to board with the booking pass; without it the screen still works but cannot find the cabin by itself.
+  final PassengerRepo? repo;
+  /// Look for the cabin by itself while the line is down. Switched off in tests.
+  final bool autoJoin;
+  final Future<CabinConnection> Function(List<String> hosts)? connector;
+  const InFlightScreen({super.key, required this.session, this.cards, this.repo, this.autoJoin = true, this.connector});
 
   @override
   State<InFlightScreen> createState() => _InFlightScreenState();
@@ -22,14 +34,48 @@ class InFlightScreen extends StatefulWidget {
 
 class _InFlightScreenState extends State<InFlightScreen> {
   Map<String, HashiCard> byId = {};
+  Timer? _searchTimer;
+  bool _searching = false;
+  bool _notFound = false;
 
   CabinSession get s => widget.session;
   String get lang => s.profile.lang;
   String t(String key) => Content.instance.t(lang, key);
 
+  /// Looks for the cabin network and, when it is found, opens the live line. Tried again every few seconds until it works.
+  Future<void> _search() async {
+    if (!mounted || _searching || s.link.online || s.store.link == LinkState.connecting) return;
+    setState(() => _searching = true);
+    final p = s.profile;
+    final hosts = defaultCabinHosts(lastGood: p.server.isEmpty ? null : p.server);
+    final repo = widget.repo;
+    final result = await (widget.connector ??
+        (h) => connectToCabin(hosts: h, getGrant: repo?.boardingGrant ?? () async => null, deviceId: repo?.deviceId ?? 'phone-unknown', bookedSeat: p.seat.isEmpty ? null : p.seat))(hosts);
+    if (!mounted) return;
+    setState(() {
+      _searching = false;
+      _notFound = !result.connected;
+    });
+    if (result.connected) {
+      p.server = result.baseUrl!;
+      s.connect(result.baseUrl!); // open the line first; remembering the address can wait
+      await p.save();
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+    if (widget.autoJoin) {
+      _search();
+      _searchTimer = Timer.periodic(const Duration(seconds: 6), (_) => _search());
+    }
     if (widget.cards != null) {
       byId = {for (final c in widget.cards!) c.id: c};
     } else {
@@ -59,7 +105,9 @@ class _InFlightScreenState extends State<InFlightScreen> {
         LinkState.online => (icon: Icons.check_circle_rounded, color: good, title: 'Connected to the crew', detail: 'Seat ${s.profile.seat}. The crew can see your requests.'),
         LinkState.connecting => (icon: Icons.sync_rounded, color: warn, title: 'Connecting…', detail: 'Looking for the cabin.'),
         LinkState.offline => (icon: Icons.wifi_off_rounded, color: warn, title: 'Reconnecting…', detail: 'Your requests are kept and will be sent as soon as the line is back.'),
-        LinkState.idle => (icon: Icons.link_off_rounded, color: warn, title: 'Not connected', detail: 'Join the cabin from "On the aircraft".'),
+        LinkState.idle => _searching
+            ? (icon: Icons.wifi_find_rounded, color: warn, title: 'Looking for the cabin…', detail: 'Connect to the aircraft Wi-Fi. Speaking and translating still work with no connection.')
+            : (icon: Icons.link_off_rounded, color: warn, title: _notFound ? 'Cabin not found yet' : 'Not connected', detail: 'Connect to the aircraft Wi-Fi. This page keeps looking. Speaking and translating still work with no connection.'),
       };
 
   @override
@@ -70,7 +118,7 @@ class _InFlightScreenState extends State<InFlightScreen> {
         final b = banner();
         final active = s.store.activeRequests;
         return WashiPage(
-          title: 'On the aircraft',
+          title: 'In flight',
           kanji: '機内',
           children: [
             StatusBanner(icon: b.icon, color: b.color, title: b.title, detail: b.detail, busy: s.store.link == LinkState.connecting),
@@ -92,13 +140,24 @@ class _InFlightScreenState extends State<InFlightScreen> {
               ),
             ),
             const SizedBox(height: 14),
-            Row(children: [
-              Expanded(child: _Door(icon: Icons.touch_app_rounded, title: t('askWhat'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DeckScreen(deck: Deck.flight, profile: s.profile, session: s, cards: widget.cards))))),
-              const SizedBox(width: 12),
-              Expanded(child: _Door(icon: Icons.forum_rounded, title: 'Talk to the crew', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TalkScreen(session: s))))),
+            SpeakBar(lang: lang),
+            if (s.store.link != LinkState.online)
+              Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CabinScreen(profile: s.profile, repo: widget.repo!, ensureSession: () => s))), icon: const Icon(Icons.settings_ethernet_rounded), label: const Text('Connection details'))) ,
+            SectionTitle('一', t('askWhat')),
+            TileGrid(tiles: [
+              for (final id in const ['water', 'food', 'blanket', 'toilet', 'medicine'])
+                if (byId[id] != null)
+                  CardTile(
+                    icon: byId[id]!.icon,
+                    label: _label(id),
+                    style: tileStyleFor(Deck.flight, byId[id]!.group),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FullCard(card: byId[id]!, profile: s.profile, deck: Deck.flight, session: s))),
+                  ),
+              CardTile(icon: Icons.add_rounded, label: 'More', style: tileStyleFor(Deck.flight, 'comfort'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DeckScreen(deck: Deck.flight, profile: s.profile, session: s, cards: widget.cards)))),
+              CardTile(icon: Icons.forum_rounded, label: 'Type to the crew', style: tileStyleFor(Deck.flight, 'info'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TalkScreen(session: s)))),
             ]),
             if (s.store.queued.isNotEmpty) ...[
-              const SectionTitle('一', 'Waiting to be sent'),
+              const SectionTitle('二', 'Waiting to be sent'),
               for (final q in s.store.queued)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
@@ -114,7 +173,7 @@ class _InFlightScreenState extends State<InFlightScreen> {
                 ),
             ],
             if (active.isNotEmpty) ...[
-              SectionTitle(s.store.queued.isEmpty ? '一' : '二', 'My requests'),
+              SectionTitle(s.store.queued.isEmpty ? '二' : '三', 'My requests'),
               for (var i = 0; i < active.length; i++)
                 Entrance(
                   key: ValueKey(active[i].id),
@@ -135,24 +194,6 @@ class _InFlightScreenState extends State<InFlightScreen> {
     if (c == null) return intent;
     return c.labels[lang] ?? c.en;
   }
-}
-
-class _Door extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final VoidCallback onTap;
-  const _Door({required this.icon, required this.title, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) => PaperCard(
-        onTap: onTap,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
-        child: Column(children: [
-          Icon(icon, color: ai, size: 34),
-          const SizedBox(height: 8),
-          Text(title, textAlign: TextAlign.center, style: const TextStyle(fontFamily: serifFont, fontSize: 17, fontWeight: FontWeight.w800, color: aiDeep)),
-        ]),
-      );
 }
 
 /// One request in progress: the three steps (sent, crew coming, crew replied), the crew's reply as a picture, words and sound,

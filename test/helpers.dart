@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hashi_mobile/cabin_link.dart';
 import 'package:hashi_mobile/content.dart';
+import 'package:hashi_mobile/engines.dart';
 import 'package:hashi_mobile/kit.dart';
 import 'package:hashi_mobile/session.dart';
 import 'package:stream_channel/stream_channel.dart';
@@ -81,3 +83,49 @@ class SoundLog {
     speakText = _oldSpeak;
   }
 }
+
+class FakeSpeech implements SpeechEngine {
+  final Set<String> locales;
+  final List<String> asked = [];
+  StreamController<SpeechEvent>? out;
+  int stops = 0;
+  FakeSpeech([this.locales = const {'hi_IN', 'ja_JP', 'pa_IN'}]);
+
+  @override
+  Future<bool> supports(String locale) async => locales.contains(locale);
+
+  @override
+  Stream<SpeechEvent> listen(String locale) {
+    asked.add(locale);
+    out = StreamController<SpeechEvent>();
+    return out!.stream;
+  }
+
+  @override
+  Future<void> stop() async => stops++;
+
+  void say(String text, {bool isFinal = false}) => out!.add(SpeechEvent(text, isFinal: isFinal));
+  void fail(String error) => out!.add(SpeechEvent('', error: error));
+  Future<void> hangUp() => out!.close();
+}
+
+class FakeTranslator implements TextTranslator {
+  final Map<String, String> table;
+  final Set<String> pairs;
+  final Map<String, Duration> delays;
+  final List<String> calls = [];
+  bool broken = false;
+  FakeTranslator(this.table, {this.pairs = const {'hi>ja', 'ja>hi'}, this.delays = const {}});
+
+  @override
+  bool supports(String from, String to) => pairs.contains('$from>$to');
+
+  @override
+  Future<String?> translate(String text, String from, String to) async {
+    calls.add('$from>$to:$text');
+    final d = delays[text];
+    if (d != null) await Future<void>.delayed(d);
+    return broken ? null : table[text];
+  }
+}
+

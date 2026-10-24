@@ -74,4 +74,25 @@ class Kit {
       await t.close();
     }
   }
+
+  /// Translate many short texts with one translator (much faster than opening one each time). Texts that cannot be
+  /// translated (a missing model, no plugin) are simply left out of the answer.
+  static Future<Map<String, String>> translateMany(List<String> texts, TranslateLanguage from, TranslateLanguage to) async {
+    final out = <String, String>{};
+    try {
+      if (from == to) return {for (final t in texts) t: t};
+      if (!await has(from) || !await has(to)) return out;
+      final t = OnDeviceTranslator(sourceLanguage: from, targetLanguage: to);
+      try {
+        for (final text in texts) {
+          out[text] = await t.translateText(text);
+        }
+      } finally {
+        await t.close();
+      }
+    } catch (_) {
+      // leave what we have
+    }
+    return out;
+  }
 }
