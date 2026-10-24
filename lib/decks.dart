@@ -149,6 +149,12 @@ const _icons = <String, IconData>{
   'Search': Icons.search_rounded, 'Undo2': Icons.undo_rounded, 'Smile': Icons.sentiment_satisfied_alt_rounded, 'TriangleAlert': Icons.warning_amber_rounded,
   'HeartPulse': Icons.monitor_heart_rounded, 'Wind': Icons.air_rounded, 'Orbit': Icons.sync_rounded, 'Bandage': Icons.healing_rounded,
   'Flame': Icons.local_fire_department_rounded, 'HandHelping': Icons.pan_tool_rounded,
+  // crew replies and announcements
+  'Check': Icons.check_circle_rounded, 'CircleSlash': Icons.block_rounded, 'ClipboardCheck': Icons.fact_check_rounded, 'DoorOpen': Icons.door_front_door_rounded,
+  'Footprints': Icons.directions_walk_rounded, 'GalleryHorizontal': Icons.view_carousel_rounded, 'HandPlatter': Icons.room_service_rounded,
+  'Hourglass': Icons.hourglass_top_rounded, 'ImagePlay': Icons.slideshow_rounded, 'Megaphone': Icons.campaign_rounded, 'ScanSearch': Icons.search_rounded,
+  'ShieldCheck': Icons.verified_user_rounded, 'Siren': Icons.notification_important_rounded, 'SmartphoneNfc': Icons.phone_android_rounded,
+  'Waves': Icons.waves_rounded, 'X': Icons.close_rounded,
 };
 
 IconData flightIcon(String lucideName) => _icons[lucideName] ?? Icons.help_outline_rounded;

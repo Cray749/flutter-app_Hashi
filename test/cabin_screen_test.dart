@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hashi_mobile/cabin.dart';
+import 'package:hashi_mobile/cabin_link.dart';
+import 'package:hashi_mobile/session.dart';
+import 'package:stream_channel/stream_channel.dart';
 import 'package:hashi_mobile/central.dart';
 import 'package:hashi_mobile/discover.dart';
 import 'package:hashi_mobile/kit.dart';
@@ -9,6 +12,13 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// A session whose line goes nowhere, so screens can be tested without a cabin.
+CabinSession quietSession(Profile p) {
+  final s = CabinSession.forProfile(p, makeLink: (store) => CabinLink(store, factory: (_) => StreamChannelController<dynamic>().local));
+  addTearDown(s.dispose);
+  return s;
+}
+
 Future<PassengerRepo> repo() async {
   SharedPreferences.setMockInitialValues({});
   return PassengerRepo.open('http://central.test', client: CentralClient('http://central.test', client: MockClient((http.Request r) async => http.Response('{}', 404))));
@@ -16,10 +26,12 @@ Future<PassengerRepo> repo() async {
 
 Future<void> show(WidgetTester t, CabinConnection result, {Profile? profile, List<List<String>>? seen}) async {
   final p = profile ?? Profile(lang: 'hi', seat: '24C');
+  final session = quietSession(p);
   await t.pumpWidget(MaterialApp(
     home: CabinScreen(
       profile: p,
       repo: await repo(),
+      ensureSession: () => session,
       retryEvery: const Duration(hours: 1),
       connector: (hosts) async {
         seen?.add(hosts);
@@ -31,7 +43,7 @@ Future<void> show(WidgetTester t, CabinConnection result, {Profile? profile, Lis
   await t.pump();
 }
 
-bool openEnabled(WidgetTester t) => t.widget<FilledButton>(find.widgetWithText(FilledButton, 'Open the cabin app')).onPressed != null;
+bool openEnabled(WidgetTester t) => t.widget<FilledButton>(find.widgetWithText(FilledButton, 'Enter the cabin')).onPressed != null;
 
 void main() {
   testWidgets('connected: shows flight and seat from the cabin, open button enabled, no address or seat field', (t) async {
@@ -83,10 +95,13 @@ void main() {
 
   testWidgets('keeps retrying by itself until it connects, then stops', (t) async {
     var calls = 0;
+    final p = Profile(lang: 'hi', seat: '24C');
+    final session = quietSession(p);
     await t.pumpWidget(MaterialApp(
       home: CabinScreen(
-        profile: Profile(lang: 'hi', seat: '24C'),
+        profile: p,
         repo: await repo(),
+        ensureSession: () => session,
         retryEvery: const Duration(seconds: 1),
         connector: (hosts) async => ++calls < 3 ? const CabinConnection(CabinState.notFound) : const CabinConnection(CabinState.ready, baseUrl: 'http://c', seat: '24C', flight: 'JL740'),
       ),

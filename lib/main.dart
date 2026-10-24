@@ -4,16 +4,26 @@ import 'package:flutter/material.dart';
 
 import 'cabin.dart';
 import 'cards.dart';
+import 'content.dart';
 import 'decks.dart';
 import 'kit.dart';
 import 'languages.dart';
+import 'overlays.dart';
 import 'preflight.dart';
 import 'repo.dart';
+import 'session.dart';
 import 'settings.dart';
 import 'sign.dart';
 import 'theme.dart';
 
-void main() => runApp(const HashiApp());
+/// Lets the cabin put announcements and checks in front of the passenger on whatever screen they are on.
+final navigatorKey = GlobalKey<NavigatorState>();
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Content.load();
+  runApp(const HashiApp());
+}
 
 class HashiApp extends StatelessWidget {
   /// Tests pass their own home screen; the app itself uses [Home].
@@ -26,6 +36,7 @@ class HashiApp extends StatelessWidget {
         builder: (_, senior, _) => MaterialApp(
           title: 'HASHI',
           debugShowCheckedModeBanner: false,
+          navigatorKey: navigatorKey,
           theme: buildTheme(),
           // Senior mode makes every piece of text a quarter bigger
           builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(senior ? 1.25 : 1.0)), child: child!),
@@ -45,6 +56,8 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
   Profile? profile;
   PassengerRepo? repo;
+  CabinSession? session;
+  late final OverlayCoordinator overlays = OverlayCoordinator(navigatorKey);
   late final AnimationController plane = AnimationController(vsync: this, duration: const Duration(seconds: 9));
 
   @override
@@ -64,8 +77,22 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
     });
   }
 
+  /// The one live session for the passenger's seat. Made on first use, and again if the seat changes (a new booking).
+  CabinSession ensureSession() {
+    final p = profile!;
+    var s = session;
+    if (s == null || s.store.seat != p.seat) {
+      s?.dispose();
+      s = session = CabinSession.forProfile(p);
+      overlays.attach(s);
+    }
+    return s;
+  }
+
   @override
   void dispose() {
+    overlays.detach();
+    session?.dispose();
     plane.dispose();
     super.dispose();
   }
@@ -89,8 +116,8 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
     final stops = <_Stop>[
       _Stop('一', Icons.event_available_rounded, 'Before you fly', 'Booking, preferences, language kit', () => go(PreflightScreen(profile: p, repo: r)), phase: ('出発前', 'Before the flight')),
       _Stop('二', Icons.luggage_rounded, 'At the airport', 'Cards for the desk, security and the gate', () => go(DeckScreen(deck: Deck.before, profile: p))),
-      _Stop('三', Icons.flight_rounded, 'On the aircraft', 'Join the cabin network and talk to the crew', () => go(CabinScreen(profile: p, repo: r)), phase: ('機内', 'In the air')),
-      _Stop('四', Icons.touch_app_rounded, 'On the flight', 'Tap what you need, the crew see it in Japanese', () => go(DeckScreen(deck: Deck.flight, profile: p))),
+      _Stop('三', Icons.flight_rounded, 'On the aircraft', 'Join the cabin network and talk to the crew', () => go(CabinScreen(profile: p, repo: r, ensureSession: ensureSession)), phase: ('機内', 'In the air')),
+      _Stop('四', Icons.touch_app_rounded, 'On the flight', 'Tap what you need, the crew see it in Japanese', () => go(DeckScreen(deck: Deck.flight, profile: p, session: p.seat.isEmpty ? null : ensureSession()))),
       _Stop('五', Icons.photo_camera_rounded, 'Read a sign', 'Camera to your language, no signal needed', () => go(SignScreen(profile: p)), phase: ('到着後', 'After landing'), tint: kinSoft),
       _Stop('六', Icons.record_voice_over_rounded, 'Show to staff', 'Japanese cards with sound', () => go(DeckScreen(deck: Deck.staff, profile: p))),
     ];
@@ -106,7 +133,7 @@ class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
               const Hanko('橋', size: 52),
               const SizedBox(width: 14),
               const Expanded(child: Text('HASHI', style: TextStyle(fontFamily: serifFont, fontSize: 34, fontWeight: FontWeight.w900, color: aiDeep, letterSpacing: 3))),
-              IconButton.filledTonal(tooltip: 'Settings', style: IconButton.styleFrom(minimumSize: const Size(48, 48), backgroundColor: Colors.white), icon: const Icon(Icons.tune_rounded, color: ai), onPressed: () => go(SettingsScreen(profile: p, repo: r))),
+              IconButton.filledTonal(tooltip: 'Settings', style: IconButton.styleFrom(minimumSize: const Size(48, 48), backgroundColor: Colors.white), icon: const Icon(Icons.tune_rounded, color: ai), onPressed: () => go(SettingsScreen(profile: p, repo: r, session: session))),
             ]),
             const SizedBox(height: 10),
             const Text("Don't translate. Understand.", style: TextStyle(fontFamily: serifFont, fontSize: 21, fontStyle: FontStyle.italic, color: sumiSoft)),

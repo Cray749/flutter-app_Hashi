@@ -1,15 +1,13 @@
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
-import 'package:http/http.dart' as http;
 
 import 'decks.dart';
-import 'discover.dart' show localCabinClient;
 import 'kit.dart';
 import 'languages.dart';
+import 'session.dart';
 import 'theme.dart';
 
 final _tts = FlutterTts();
@@ -33,27 +31,15 @@ const deckInfo = <Deck, DeckInfo>{
   Deck.staff: DeckInfo('Show to staff', '到着後', 'After landing: show a card to anyone who can help you.', Icons.record_voice_over_rounded),
 };
 
-/// Sends a flight card to the crew through the cabin server's existing request endpoint. Returns an error message, or null on success.
-Future<String?> sendToCrew(Profile p, String intentId, {http.Client? client}) async {
-  if (p.seat.isEmpty || p.server.isEmpty) return 'Join the cabin first, so the crew know your seat.';
-  final c = client ?? localCabinClient();
-  try {
-    final r = await c
-        .post(Uri.parse('${p.server.replaceAll(RegExp(r'/+$'), '')}/api/live/send'), headers: {'Content-Type': 'application/json'}, body: jsonEncode({'seat': p.seat, 'intent': intentId}))
-        .timeout(const Duration(seconds: 6));
-    return r.statusCode == 200 ? null : 'The cabin could not take the request (${r.statusCode}).';
-  } catch (_) {
-    return 'Could not reach the cabin. Check the aircraft Wi-Fi.';
-  }
-}
-
 /// A deck: group filter on top, then the cards.
 class DeckScreen extends StatefulWidget {
   final Deck deck;
   final Profile profile;
   /// Tests can pass cards directly instead of loading the bundled file.
   final List<HashiCard>? cards;
-  const DeckScreen({super.key, required this.deck, required this.profile, this.cards});
+  /// The live line to the crew; flight cards are sent through it.
+  final CabinSession? session;
+  const DeckScreen({super.key, required this.deck, required this.profile, this.cards, this.session});
 
   @override
   State<DeckScreen> createState() => _DeckScreenState();
@@ -117,7 +103,7 @@ class _DeckScreenState extends State<DeckScreen> {
               padding: const EdgeInsets.only(bottom: 10),
               child: PaperCard(
                 spine: spineFor(shown[i]),
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FullCard(card: shown[i], profile: widget.profile, deck: widget.deck))),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FullCard(card: shown[i], profile: widget.profile, deck: widget.deck, session: widget.session))),
                 child: Row(children: [
                   Container(width: 48, height: 48, decoration: BoxDecoration(color: washi, shape: BoxShape.circle, border: Border.all(color: ai.withValues(alpha: 0.15))), child: Icon(shown[i].icon, color: ai, size: 26)),
                   const SizedBox(width: 14),
@@ -146,8 +132,8 @@ class FullCard extends StatefulWidget {
   final HashiCard card;
   final Profile profile;
   final Deck deck;
-  final http.Client? client; // tests
-  const FullCard({super.key, required this.card, required this.profile, required this.deck, this.client});
+  final CabinSession? session;
+  const FullCard({super.key, required this.card, required this.profile, required this.deck, this.session});
 
   @override
   State<FullCard> createState() => _FullCardState();
@@ -156,7 +142,6 @@ class FullCard extends StatefulWidget {
 class _FullCardState extends State<FullCard> {
   String? mine;
   bool flipped = false;
-  bool sending = false;
   String? sendResult;
   bool sendOk = false;
 
@@ -175,11 +160,19 @@ class _FullCardState extends State<FullCard> {
     }
   }
 
-  Future<void> send() async {
-    setState(() { sending = true; sendResult = null; });
-    final err = await sendToCrew(widget.profile, widget.card.id, client: widget.client);
-    if (!mounted) return;
-    setState(() { sending = false; sendOk = err == null; sendResult = err ?? 'Sent to the crew · 乗務員に送りました'; });
+  /// Sends the card to the crew over the live line. With the line down the request is kept and goes out when it is back.
+  void send() {
+    final session = widget.session;
+    if (session == null || widget.profile.seat.isEmpty) {
+      setState(() { sendOk = false; sendResult = 'Join the cabin first, so the crew know your seat.'; });
+      return;
+    }
+    final online = session.link.online;
+    session.link.sendRequest(widget.card.id);
+    setState(() {
+      sendOk = true;
+      sendResult = online ? 'Sent to the crew · 乗務員に送りました' : 'Saved. It will be sent as soon as you are connected.';
+    });
   }
 
   Widget face({required bool front}) {
@@ -228,8 +221,8 @@ class _FullCardState extends State<FullCard> {
             if (isFlight)
               FilledButton.icon(
                 style: FilledButton.styleFrom(backgroundColor: shuBright, foregroundColor: Colors.white, minimumSize: const Size.fromHeight(58)),
-                onPressed: sending ? null : send,
-                icon: sending ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.send_rounded),
+                onPressed: send,
+                icon: const Icon(Icons.send_rounded),
                 label: const Text('Send to crew · 乗務員に送る'),
               ),
             const SizedBox(height: 10),

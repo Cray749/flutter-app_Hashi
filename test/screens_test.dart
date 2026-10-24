@@ -2,17 +2,21 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hashi_mobile/cabin_link.dart';
 import 'package:hashi_mobile/cards.dart';
 import 'package:hashi_mobile/central.dart';
 import 'package:hashi_mobile/decks.dart';
 import 'package:hashi_mobile/kit.dart';
 import 'package:hashi_mobile/main.dart';
 import 'package:hashi_mobile/repo.dart';
+import 'package:hashi_mobile/session.dart';
 import 'package:hashi_mobile/settings.dart';
 import 'package:hashi_mobile/theme.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'helpers.dart';
 
 Future<PassengerRepo> repo({bool signedIn = false, bool online = false}) async {
   SharedPreferences.setMockInitialValues({});
@@ -153,13 +157,23 @@ void main() {
   });
 
   group('full card', () {
-    Future<void> show(WidgetTester t, Profile p, {http.Client? client, Deck deck = Deck.flight}) async {
-      await t.pumpWidget(MaterialApp(theme: buildTheme(), home: FullCard(card: sample[0], profile: p, deck: deck, client: client)));
+    Future<(CabinSession, FakeCabin)> show(WidgetTester t, Profile p, {Deck deck = Deck.flight, bool online = true, bool withSession = true}) async {
+      final cabin = FakeCabin();
+      final session = CabinSession.forProfile(p, makeLink: (store) => CabinLink(store, factory: cabin.open, pingEvery: Duration.zero));
+      addTearDown(session.dispose);
+      if (online) {
+        session.connect('http://cabin.test:8000');
+        await t.pump();
+        cabin.welcome();
+        await t.pump();
+      }
+      await t.pumpWidget(MaterialApp(theme: buildTheme(), home: FullCard(card: sample[0], profile: p, deck: deck, session: withSession ? session : null)));
       await settle(t);
+      return (session, cabin);
     }
 
-    testWidgets('can be flipped to the passenger\'s language and back', (t) async {
-      await show(t, Profile(lang: 'hi', seat: '24C', server: 'http://cabin.test'));
+    testWidgets("can be flipped to the passenger's language and back", (t) async {
+      await show(t, Profile(lang: 'hi', seat: '24C'));
       expect(find.text('पानी चाहिए'), findsNothing);
       await t.tap(find.text('हिन्दी'));
       await settle(t);
@@ -169,47 +183,36 @@ void main() {
       expect(find.text('お水をお願いします'), findsWidgets);
     });
 
-    testWidgets('sends the card id and the seat to the crew and says so', (t) async {
-      late Map<String, dynamic> sent;
-      final client = MockClient((r) async {
-        expect(r.url.toString(), 'http://cabin.test/api/live/send');
-        sent = jsonDecode(r.body);
-        return http.Response('{"ok":true}', 200);
-      });
-      await show(t, Profile(lang: 'hi', seat: '24C', server: 'http://cabin.test'), client: client);
+    testWidgets('sends the card to the crew over the live line and says so', (t) async {
+      final (_, cabin) = await show(t, Profile(lang: 'hi', seat: '24C'));
       await t.tap(find.text('Send to crew · 乗務員に送る'));
       await settle(t);
-      expect(sent, {'seat': '24C', 'intent': 'water'});
+      expect(cabin.lastInbox.last, {'t': 'request', 'intent': 'water', 'via': 'tap'});
       expect(find.text('Sent to the crew · 乗務員に送りました'), findsOneWidget);
     });
 
-    testWidgets('tells the passenger when the cabin cannot be reached', (t) async {
-      final client = MockClient((r) async => throw http.ClientException('no route'));
-      await show(t, Profile(lang: 'hi', seat: '24C', server: 'http://cabin.test'), client: client);
+    testWidgets('with the line down the request is kept, and the screen says it will be sent later', (t) async {
+      final (session, cabin) = await show(t, Profile(lang: 'hi', seat: '24C'), online: false);
       await t.tap(find.text('Send to crew · 乗務員に送る'));
       await settle(t);
-      expect(find.textContaining('Could not reach the cabin'), findsOneWidget);
+      expect(find.textContaining('It will be sent as soon as you are connected'), findsOneWidget);
+      expect(session.store.queued.single.intent, 'water');
+      expect(cabin.connections, isEmpty);
     });
 
-    testWidgets('without a seat it asks to join the cabin first and sends nothing', (t) async {
-      var calls = 0;
-      final client = MockClient((r) async {
-        calls++;
-        return http.Response('{}', 200);
-      });
-      await show(t, Profile(lang: 'hi', seat: '', server: 'http://cabin.test'), client: client);
+    testWidgets('without a seat it asks to join the cabin first and keeps nothing', (t) async {
+      final (session, _) = await show(t, Profile(lang: 'hi', seat: ''), online: false);
       await t.tap(find.text('Send to crew · 乗務員に送る'));
       await settle(t);
       expect(find.textContaining('Join the cabin first'), findsOneWidget);
-      expect(calls, 0);
+      expect(session.store.queued, isEmpty);
     });
 
-    testWidgets('a cabin error code is reported, not hidden', (t) async {
-      final client = MockClient((r) async => http.Response('{}', 400));
-      await show(t, Profile(lang: 'hi', seat: '24C', server: 'http://cabin.test'), client: client);
+    testWidgets('without a session it asks to join the cabin first', (t) async {
+      await show(t, Profile(lang: 'hi', seat: '24C'), online: false, withSession: false);
       await t.tap(find.text('Send to crew · 乗務員に送る'));
       await settle(t);
-      expect(find.textContaining('(400)'), findsOneWidget);
+      expect(find.textContaining('Join the cabin first'), findsOneWidget);
     });
 
     testWidgets('only the flight deck can send to the crew', (t) async {

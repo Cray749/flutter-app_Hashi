@@ -26,14 +26,17 @@ String _trim(String url) => url.replaceAll(RegExp(r'/+$'), '');
 
 String _otherScheme(String url) => url.startsWith('https://') ? 'http://${url.substring(8)}' : 'https://${url.substring(url.startsWith('http://') ? 7 : 0)}';
 
-bool _isLocalHost(String host) =>
+bool isLocalHost(String host) =>
     host.endsWith('.local') ||
     host.endsWith('.cabin') ||
     RegExp(r'^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)').hasMatch(host);
 
 /// An http client that accepts the cabin server's self-signed certificate, but only for addresses on the local network.
 /// (The cabin uses https so the phone browser allows the microphone; nothing outside the aircraft network is trusted this way.)
-http.Client localCabinClient() => IOClient(HttpClient()..badCertificateCallback = (cert, host, port) => _isLocalHost(host));
+/// The same trust rule for the WebSocket link.
+HttpClient localHttpClient() => HttpClient()..badCertificateCallback = (cert, host, port) => isLocalHost(host);
+
+http.Client localCabinClient() => IOClient(HttpClient()..badCertificateCallback = (cert, host, port) => isLocalHost(host));
 
 class CabinInfo {
   final String baseUrl;

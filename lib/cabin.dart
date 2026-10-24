@@ -1,25 +1,24 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
-
 import 'theme.dart';
 import 'discover.dart';
+import 'inflight.dart';
 import 'kit.dart';
 import 'repo.dart';
+import 'session.dart';
 
 /// Phase 2 and 3: the phone looks for the aircraft network by itself, boards with the signed pass from the booking
-/// (so the crew see the seat and preferences without anyone typing them), and opens the cabin app.
+/// (so the crew see the seat and preferences without anyone typing them), and opens the in-flight screens.
 class CabinScreen extends StatefulWidget {
   final Profile profile;
   final PassengerRepo repo;
+  /// Gives the app-wide cabin session for the profile's current seat (made on first use).
+  final CabinSession Function() ensureSession;
   /// Replaceable in tests.
   final Future<CabinConnection> Function(List<String> hosts)? connector;
   final Duration retryEvery;
-  const CabinScreen({super.key, required this.profile, required this.repo, this.connector, this.retryEvery = const Duration(seconds: 5)});
+  const CabinScreen({super.key, required this.profile, required this.repo, required this.ensureSession, this.connector, this.retryEvery = const Duration(seconds: 5)});
 
   @override
   State<CabinScreen> createState() => _CabinScreenState();
@@ -30,7 +29,6 @@ class _CabinScreenState extends State<CabinScreen> {
   CabinConnection? connection;
   bool searching = false;
   bool showManual = false;
-  WebViewController? web;
   Timer? timer;
 
   Profile get p => widget.profile;
@@ -65,19 +63,12 @@ class _CabinScreenState extends State<CabinScreen> {
       p.server = result.baseUrl!;
       if (result.seat != null) p.seat = result.seat!;
       await p.save();
+      // Open the live line to the crew. Calling this again after a reconnect simply restarts it.
+      if (p.seat.isNotEmpty) widget.ensureSession().connect(result.baseUrl!);
     }
   }
 
-  void open() {
-    final c = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..loadRequest(Uri.parse(p.cabinUrl()));
-    final platform = c.platform;
-    if (platform is AndroidWebViewController) {
-      platform.setOnPlatformPermissionRequest((request) => request.grant());
-    }
-    setState(() => web = c);
-  }
+  void enter() => Navigator.push(context, MaterialPageRoute(builder: (_) => InFlightScreen(session: widget.ensureSession())));
 
   ({IconData icon, Color color, String title, String detail}) status() {
     final c = connection;
@@ -102,18 +93,6 @@ class _CabinScreenState extends State<CabinScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (web != null) {
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Cabin · 機内'),
-          backgroundColor: navy,
-          foregroundColor: Colors.white,
-          leading: IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => web = null)),
-          actions: [IconButton(icon: const Icon(Icons.open_in_browser), tooltip: 'Open in browser (microphone)', onPressed: () => launchUrl(Uri.parse(p.cabinUrl()), mode: LaunchMode.externalApplication))],
-        ),
-        body: WebViewWidget(controller: web!),
-      );
-    }
     final s = status();
     final c = connection;
     return WashiPage(
@@ -125,29 +104,15 @@ class _CabinScreenState extends State<CabinScreen> {
         const SizedBox(height: 16),
         FilledButton.icon(
           style: FilledButton.styleFrom(backgroundColor: shuBright, minimumSize: const Size.fromHeight(60)),
-          onPressed: c?.connected == true ? open : null,
+          onPressed: c?.connected == true ? enter : null,
           icon: const Icon(Icons.flight_rounded),
-          label: const Text('Open the cabin app', style: TextStyle(fontSize: 18)),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: c?.connected == true ? () => launchUrl(Uri.parse(p.cabinUrl()), mode: LaunchMode.externalApplication) : null,
-          icon: const Icon(Icons.open_in_browser_rounded),
-          label: const Text('Open in the phone browser (use this for the microphone)'),
+          label: const Text('Enter the cabin', style: TextStyle(fontSize: 18)),
         ),
         const SizedBox(height: 6),
         TextButton(onPressed: searching ? null : search, child: const Text('Try again now')),
         if (c != null && !c.connected)
           TextButton(onPressed: () => setState(() => showManual = !showManual), child: Text(showManual ? 'Hide the address box' : 'Cabin not found? Enter the address from the crew')),
         if (showManual) TextField(controller: manualAddress, decoration: const InputDecoration(labelText: 'Cabin address', helperText: 'Shown by the crew under the QR code')),
-        const SizedBox(height: 18),
-        PaperCard(
-          child: Column(children: [
-            const Text('My profile QR · language, text size and needs, no name', textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: sumiSoft)),
-            const SizedBox(height: 12),
-            QrImageView(data: p.cabinUrl(), size: 210),
-          ]),
-        ),
       ],
     );
   }

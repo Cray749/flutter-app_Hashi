@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'kit.dart';
 import 'languages.dart';
 import 'repo.dart';
+import 'session.dart';
 import 'theme.dart';
 
 /// What the crew and the app should know about the passenger. Changes are saved on the phone at once and sent to the account
@@ -19,7 +20,9 @@ const needOptions = <String, (String, IconData)>{
 class SettingsScreen extends StatefulWidget {
   final Profile profile;
   final PassengerRepo repo;
-  const SettingsScreen({super.key, required this.profile, required this.repo});
+  /// When the passenger is in the cabin, profile changes are sent to the crew straight away.
+  final CabinSession? session;
+  const SettingsScreen({super.key, required this.profile, required this.repo, this.session});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -37,6 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     calmMotion.value = p.calm;
     setState(() => saving = true);
     await p.save();
+    widget.session?.link.updateProfile();
     var sent = false;
     if (repo.signedIn) sent = await repo.edit(preferencesFromProfile(p, repo.preferences));
     if (!mounted) return;
