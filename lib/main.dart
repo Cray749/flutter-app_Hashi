@@ -6,6 +6,7 @@ import 'kit.dart';
 import 'languages.dart';
 import 'preflight.dart';
 import 'repo.dart';
+import 'theme.dart';
 
 void main() => runApp(const HashiApp());
 
@@ -18,7 +19,7 @@ class HashiApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'HASHI',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: navy, primary: navy, secondary: saffron), useMaterial3: true, scaffoldBackgroundColor: const Color(0xFFF7F5EF)),
+        theme: buildTheme(),
         home: home ?? const Home(),
       );
 }

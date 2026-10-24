@@ -68,6 +68,30 @@ void main() {
       expect(await d.find(['http://192.168.137.1:8000']), isNull);
     });
 
+    test('a cabin running https is found too (self-signed certificates are expected on the aircraft network)', () async {
+      final log = <String>[];
+      final c = MockClient((r) async {
+        log.add(r.url.toString());
+        if (r.url.scheme == 'https' && r.url.host == '192.168.137.1') return cabinPing;
+        throw http.ClientException('no');
+      });
+      final info = await Discovery(client: c).find(['http://192.168.137.1:8000']);
+      expect(info!.baseUrl, 'https://192.168.137.1:8000');
+      expect(log, containsAll(['http://192.168.137.1:8000/api/ping', 'https://192.168.137.1:8000/api/ping']));
+    });
+
+    test('all addresses are checked together, so one dead name does not delay the answer', () async {
+      final c = MockClient((r) async {
+        if (r.url.host == 'hashi-cabin.local') await Future.delayed(const Duration(milliseconds: 400));
+        if (r.url.host == '192.168.137.1' && r.url.scheme == 'http') return cabinPing;
+        throw http.ClientException('no');
+      });
+      final watch = Stopwatch()..start();
+      final info = await Discovery(client: c, timeout: const Duration(seconds: 2)).find(defaultCabinHosts());
+      expect(info!.baseUrl, 'http://192.168.137.1:8000');
+      expect(watch.elapsedMilliseconds, lessThan(1500));
+    });
+
     test('nothing reachable gives null, and a slow host is skipped', () async {
       expect(await Discovery(client: fake({})).find(defaultCabinHosts()), isNull);
       final slow = MockClient((r) => Future.delayed(const Duration(milliseconds: 300), () => cabinPing));
@@ -122,6 +146,12 @@ void main() {
       expect(c.state, CabinState.noPass);
       expect(c.connected, false);
       expect(log.any((l) => l.contains('board')), false);
+    });
+
+    test('no pass but a saved seat: still joins, using that seat', () async {
+      final c = await connectToCabin(hosts: ['http://cabin.test:8000'], getGrant: () async => null, deviceId: 'd', bookedSeat: '24C', client: fake(ping));
+      expect(c.state, CabinState.readyWithoutPass);
+      expect(c.seat, '24C');
     });
 
     test('an older cabin without /api/board still connects using the booked seat', () async {

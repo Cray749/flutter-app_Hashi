@@ -1,6 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+
+import 'theme.dart';
+export 'theme.dart' show navy, saffron;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
@@ -9,8 +12,6 @@ import 'package:image_picker/image_picker.dart';
 import 'kit.dart';
 import 'languages.dart';
 
-const navy = Color(0xFF0E1A3A);
-const saffron = Color(0xFFF59E1B);
 
 final _tts = FlutterTts();
 

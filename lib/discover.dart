@@ -1,6 +1,9 @@
 import 'dart:convert';
 
+import 'dart:io';
+
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
 /// Finds the aircraft's cabin server on the local network and joins it with the signed boarding pass.
 /// The seat is never typed: it comes from the pass.
@@ -21,6 +24,17 @@ List<String> defaultCabinHosts({String? lastGood, String? fromQr, int port = 800
 
 String _trim(String url) => url.replaceAll(RegExp(r'/+$'), '');
 
+String _otherScheme(String url) => url.startsWith('https://') ? 'http://${url.substring(8)}' : 'https://${url.substring(url.startsWith('http://') ? 7 : 0)}';
+
+bool _isLocalHost(String host) =>
+    host.endsWith('.local') ||
+    host.endsWith('.cabin') ||
+    RegExp(r'^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)').hasMatch(host);
+
+/// An http client that accepts the cabin server's self-signed certificate, but only for addresses on the local network.
+/// (The cabin uses https so the phone browser allows the microphone; nothing outside the aircraft network is trusted this way.)
+http.Client localCabinClient() => IOClient(HttpClient()..badCertificateCallback = (cert, host, port) => _isLocalHost(host));
+
 class CabinInfo {
   final String baseUrl;
   final String flight;
@@ -32,11 +46,14 @@ class CabinInfo {
 class Discovery {
   final http.Client _http;
   final Duration timeout;
-  Discovery({http.Client? client, this.timeout = const Duration(seconds: 2)}) : _http = client ?? http.Client();
+  Discovery({http.Client? client, this.timeout = const Duration(seconds: 2)}) : _http = client ?? localCabinClient();
 
+  /// Checks every address at once (so a dead name does not slow things down) and returns the best one that answers,
+  /// in list order. Each host is tried on http and on https, because the cabin may run with a self-signed certificate.
   Future<CabinInfo?> find(List<String> hosts) async {
-    for (final host in hosts) {
-      final info = await probe(host);
+    final candidates = <String>[for (final h in hosts) ...[_trim(h), _otherScheme(_trim(h))]];
+    final found = await Future.wait(candidates.map(probe));
+    for (final info in found) {
       if (info != null) return info;
     }
     return null;
@@ -77,7 +94,7 @@ class BoardResult {
 
 /// Hands the boarding pass to the cabin. The cabin checks it and tells the crew about the seat and preferences.
 Future<BoardResult> boardCabin(String cabinUrl, String grant, String deviceId, {http.Client? client, Duration timeout = const Duration(seconds: 5)}) async {
-  final c = client ?? http.Client();
+  final c = client ?? localCabinClient();
   try {
     final r = await c
         .post(Uri.parse('${_trim(cabinUrl)}/api/board'), headers: {'Content-Type': 'application/json'}, body: jsonEncode({'grant': grant, 'device_id': deviceId}))
@@ -137,8 +154,10 @@ Future<CabinConnection> connectToCabin({
 
   final grant = await getGrant();
   if (grant == null) {
-    // Reachable, but this phone has no valid pass (never fetched one online, or it expired).
-    return CabinConnection(CabinState.noPass, baseUrl: cabin.baseUrl, flight: cabin.flight, seat: bookedSeat);
+    // Reachable, but this phone has no valid pass (never fetched one online, or it expired). With a saved seat the
+    // passenger can still join; a cabin that insists on passes will refuse the seat on its own side.
+    if (bookedSeat != null) return CabinConnection(CabinState.readyWithoutPass, baseUrl: cabin.baseUrl, flight: cabin.flight, seat: bookedSeat);
+    return CabinConnection(CabinState.noPass, baseUrl: cabin.baseUrl, flight: cabin.flight);
   }
 
   final result = await boardCabin(cabin.baseUrl, grant, deviceId, client: client);

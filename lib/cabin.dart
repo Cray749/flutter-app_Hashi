@@ -10,6 +10,7 @@ import 'airport.dart' show navy, saffron;
 import 'discover.dart';
 import 'kit.dart';
 import 'repo.dart';
+import 'theme.dart' show StatusBanner;
 
 /// Phase 2 and 3: the phone looks for the aircraft network by itself, boards with the signed pass from the booking
 /// (so the crew see the seat and preferences without anyone typing them), and opens the cabin app.
@@ -86,7 +87,7 @@ class _CabinScreenState extends State<CabinScreen> {
       case CabinState.ready:
         return (icon: Icons.check_circle, color: Colors.green, title: 'Connected${c!.flight?.isNotEmpty == true ? ' to ${c.flight}' : ''} · seat ${c.seat ?? p.seat}', detail: 'The crew can see your language and needs.');
       case CabinState.readyWithoutPass:
-        return (icon: Icons.check_circle_outline, color: Colors.green, title: 'Connected to the cabin · seat ${c!.seat ?? p.seat}', detail: 'This cabin server does not take boarding passes yet, so your booked seat is used.');
+        return (icon: Icons.check_circle_outline, color: Colors.green, title: 'Connected to the cabin · seat ${c!.seat ?? p.seat}', detail: 'No boarding pass was used, so your saved seat is shown. The crew still see your requests.');
       case CabinState.noPass:
         return (icon: Icons.warning_amber, color: Colors.deepOrange, title: 'Cabin found, but no boarding pass', detail: 'Open the app with internet once before the flight, on the "Before you fly" step, to get your pass.');
       case CabinState.refused:
@@ -119,13 +120,7 @@ class _CabinScreenState extends State<CabinScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Join the cabin · 機内に接続'), backgroundColor: navy, foregroundColor: Colors.white),
       body: ListView(padding: const EdgeInsets.all(14), children: [
-        Card(
-          child: ListTile(
-            leading: searching ? const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3)) : Icon(s.icon, color: s.color, size: 32),
-            title: Text(s.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text(s.detail),
-          ),
-        ),
+        StatusBanner(icon: s.icon, color: s.color, title: s.title, detail: s.detail, busy: searching),
         const SizedBox(height: 12),
         FilledButton.icon(
           style: FilledButton.styleFrom(backgroundColor: saffron, foregroundColor: navy, minimumSize: const Size.fromHeight(56)),
