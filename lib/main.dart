@@ -80,7 +80,7 @@ class _HomeState extends State<Home> {
         Text('${p.seat.isEmpty ? 'Seat comes from your booking' : 'Seat ${p.seat}'} · ${l.name}${p.senior ? ' · bigger text' : ''}'),
         const SizedBox(height: 12),
         step(Icons.event_available, '1 · Before you fly', 'Booking, preferences, language kit', () => go(PreflightScreen(profile: p, repo: r))),
-        step(Icons.flight, '2 · On the aircraft', 'Join the cabin network and talk to the crew', () => go(CabinScreen(profile: p))),
+        step(Icons.flight, '2 · On the aircraft', 'Join the cabin network and talk to the crew', () => go(CabinScreen(profile: p, repo: r))),
         step(Icons.camera_alt, '3 · After landing: read a sign', 'Camera to text to your language, no signal needed', () => go(SignScreen(profile: p)), color: const Color(0xFFFDF0D5)),
         step(Icons.record_voice_over, '3 · After landing: show staff', 'Japanese cards with sound', () => go(CardsScreen(profile: p))),
         const SizedBox(height: 16),

@@ -53,7 +53,7 @@ class Preferences {
         'font_scale': senior ? 140 : 100,
         'needs': needs,
         'extra_languages': extraLanguages,
-        if (expectedVersion != null) 'expected_version': expectedVersion,
+        'expected_version': ?expectedVersion,
       };
 
   Map<String, dynamic> toJson() => {
