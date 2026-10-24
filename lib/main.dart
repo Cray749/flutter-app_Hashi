@@ -1,11 +1,16 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
-import 'airport.dart';
 import 'cabin.dart';
+import 'cards.dart';
+import 'decks.dart';
 import 'kit.dart';
 import 'languages.dart';
 import 'preflight.dart';
 import 'repo.dart';
+import 'settings.dart';
+import 'sign.dart';
 import 'theme.dart';
 
 void main() => runApp(const HashiApp());
@@ -16,15 +21,20 @@ class HashiApp extends StatelessWidget {
   const HashiApp({super.key, this.home});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-        title: 'HASHI',
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(),
-        home: home ?? const Home(),
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+        valueListenable: seniorMode,
+        builder: (_, senior, _) => MaterialApp(
+          title: 'HASHI',
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(),
+          // Senior mode makes every piece of text a quarter bigger
+          builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(senior ? 1.25 : 1.0)), child: child!),
+          home: home ?? const Home(),
+        ),
       );
 }
 
-/// The passenger's journey in four steps: before you fly, boarding and the cabin, the airport and city, and your kit.
+/// The passenger's journey from home to Japan: before you fly, on the aircraft, after landing.
 class Home extends StatefulWidget {
   const Home({super.key});
 
@@ -32,61 +42,193 @@ class Home extends StatefulWidget {
   State<Home> createState() => _HomeState();
 }
 
-class _HomeState extends State<Home> {
+class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
   Profile? profile;
   PassengerRepo? repo;
+  late final AnimationController plane = AnimationController(vsync: this, duration: const Duration(seconds: 9));
 
   @override
   void initState() {
     super.initState();
     Profile.load().then((p) async {
+      seniorMode.value = p.senior;
+      calmMotion.value = p.calm;
       final r = await PassengerRepo.open(p.central);
       applyAccountToProfile(p, r.preferences, r.trip);
       if (mounted) setState(() { profile = p; repo = r; });
       // pick up changes made elsewhere when there is a signal; silent when there is none
-      if (await r.refresh() && mounted) setState(() => applyAccountToProfile(p, r.preferences, r.trip));
+      if (await r.refresh() && mounted) {
+        setState(() => applyAccountToProfile(p, r.preferences, r.trip));
+        seniorMode.value = p.senior;
+      }
     });
   }
 
-  void go(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen)).then((_) => setState(() {}));
+  @override
+  void dispose() {
+    plane.dispose();
+    super.dispose();
+  }
 
-  Widget step(IconData icon, String title, String subtitle, VoidCallback onTap, {Color? color}) => Card(
-        color: color,
-        child: ListTile(
-          minVerticalPadding: 16,
-          leading: CircleAvatar(backgroundColor: navy, foregroundColor: Colors.white, child: Icon(icon)),
-          title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-          subtitle: Text(subtitle),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: onTap,
-        ),
-      );
+  void go(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen)).then((_) {
+        if (mounted) setState(() {});
+        if (profile != null) { seniorMode.value = profile!.senior; calmMotion.value = profile!.calm; }
+      });
 
   @override
   Widget build(BuildContext context) {
     final p = profile;
     final r = repo;
-    if (p == null || r == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (p == null || r == null) return const Scaffold(body: Center(child: CircularProgressIndicator(color: ai)));
+    final animate = motionAllowed(context);
+    if (animate && !plane.isAnimating) plane.repeat();
+    if (!animate && plane.isAnimating) plane.stop();
     final l = langByCode(p.lang);
+    final trip = r.trip;
+
+    final stops = <_Stop>[
+      _Stop('一', Icons.event_available_rounded, 'Before you fly', 'Booking, preferences, language kit', () => go(PreflightScreen(profile: p, repo: r)), phase: ('出発前', 'Before the flight')),
+      _Stop('二', Icons.luggage_rounded, 'At the airport', 'Cards for the desk, security and the gate', () => go(DeckScreen(deck: Deck.before, profile: p))),
+      _Stop('三', Icons.flight_rounded, 'On the aircraft', 'Join the cabin network and talk to the crew', () => go(CabinScreen(profile: p, repo: r)), phase: ('機内', 'In the air')),
+      _Stop('四', Icons.touch_app_rounded, 'On the flight', 'Tap what you need, the crew see it in Japanese', () => go(DeckScreen(deck: Deck.flight, profile: p))),
+      _Stop('五', Icons.photo_camera_rounded, 'Read a sign', 'Camera to your language, no signal needed', () => go(SignScreen(profile: p)), phase: ('到着後', 'After landing'), tint: kinSoft),
+      _Stop('六', Icons.record_voice_over_rounded, 'Show to staff', 'Japanese cards with sound', () => go(DeckScreen(deck: Deck.staff, profile: p))),
+    ];
+
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: navy,
-        foregroundColor: Colors.white,
-        title: const Text('HASHI 橋 · पुल · ਪੁਲ'),
-        actions: [Padding(padding: const EdgeInsets.only(right: 12), child: Center(child: Text(l.name, style: const TextStyle(fontSize: 16))))],
-      ),
-      body: ListView(padding: const EdgeInsets.all(14), children: [
-        const Text("Don't translate. Understand.", style: TextStyle(fontSize: 20, fontStyle: FontStyle.italic)),
-        const SizedBox(height: 4),
-        Text('${p.seat.isEmpty ? 'Seat comes from your booking' : 'Seat ${p.seat}'} · ${l.name}${p.senior ? ' · bigger text' : ''}'),
-        const SizedBox(height: 12),
-        step(Icons.event_available, '1 · Before you fly', 'Booking, preferences, language kit', () => go(PreflightScreen(profile: p, repo: r))),
-        step(Icons.flight, '2 · On the aircraft', 'Join the cabin network and talk to the crew', () => go(CabinScreen(profile: p, repo: r))),
-        step(Icons.camera_alt, '3 · After landing: read a sign', 'Camera to text to your language, no signal needed', () => go(SignScreen(profile: p)), color: const Color(0xFFFDF0D5)),
-        step(Icons.record_voice_over, '3 · After landing: show staff', 'Japanese cards with sound', () => go(CardsScreen(profile: p))),
-        const SizedBox(height: 16),
-        const Text('Your data stays on this phone. Nothing is sent anywhere unless you join the cabin network.', style: TextStyle(color: Colors.black54)),
+      body: Stack(children: [
+        const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [washi, Color(0xFFF1EADB)])))),
+        const Positioned(top: 0, left: 0, right: 0, height: 220, child: CustomPaint(painter: SeigaihaPainter())),
+        if (animate) const Positioned.fill(child: IgnorePointer(child: SakuraDrift(count: 16))),
+        SafeArea(
+          child: ListView(padding: const EdgeInsets.fromLTRB(18, 10, 18, 30), children: [
+            Row(children: [
+              const Hanko('橋', size: 52),
+              const SizedBox(width: 14),
+              const Expanded(child: Text('HASHI', style: TextStyle(fontFamily: serifFont, fontSize: 34, fontWeight: FontWeight.w900, color: aiDeep, letterSpacing: 3))),
+              IconButton.filledTonal(tooltip: 'Settings', style: IconButton.styleFrom(minimumSize: const Size(48, 48), backgroundColor: Colors.white), icon: const Icon(Icons.tune_rounded, color: ai), onPressed: () => go(SettingsScreen(profile: p, repo: r))),
+            ]),
+            const SizedBox(height: 10),
+            const Text("Don't translate. Understand.", style: TextStyle(fontFamily: serifFont, fontSize: 21, fontStyle: FontStyle.italic, color: sumiSoft)),
+            const SizedBox(height: 14),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              _Chip(Icons.event_seat_rounded, p.seat.isEmpty ? 'Seat comes from your booking' : 'Seat ${p.seat}'),
+              if (trip != null) _Chip(Icons.flight_takeoff_rounded, '${trip.flightNumber} · ${trip.from} → ${trip.to}'),
+              _Chip(Icons.translate_rounded, l.name),
+              if (p.senior) const _Chip(Icons.zoom_in_rounded, 'Bigger text'),
+            ]),
+            const SizedBox(height: 18),
+            Stack(children: [
+              Positioned.fill(child: CustomPaint(painter: _JourneyLine(plane))),
+              Column(children: [for (var i = 0; i < stops.length; i++) _StopTile(stop: stops[i], index: i)]),
+            ]),
+            const SizedBox(height: 10),
+            const Text('Your data stays on this phone. Nothing is sent anywhere unless you join the cabin network.', style: TextStyle(color: sumiSoft, fontSize: 14, height: 1.35)),
+          ]),
+        ),
       ]),
     );
   }
+}
+
+class _Stop {
+  final String numeral;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final (String, String)? phase;
+  final Color tint;
+  _Stop(this.numeral, this.icon, this.title, this.subtitle, this.onTap, {this.phase, this.tint = Colors.white});
+}
+
+class _Chip extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _Chip(this.icon, this.text);
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.85), borderRadius: BorderRadius.circular(22), border: Border.all(color: ai.withValues(alpha: 0.15))),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 18, color: ai), const SizedBox(width: 6), Text(text, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: sumi))]),
+      );
+}
+
+class _StopTile extends StatelessWidget {
+  final _Stop stop;
+  final int index;
+  const _StopTile({required this.stop, required this.index});
+
+  @override
+  Widget build(BuildContext context) {
+    return Entrance(
+      index: index,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (stop.phase != null)
+          Padding(
+            padding: EdgeInsets.only(left: 58, top: index == 0 ? 0 : 14, bottom: 8),
+            child: Row(children: [
+              Text(stop.phase!.$1, style: const TextStyle(fontFamily: serifFont, fontSize: 22, fontWeight: FontWeight.w900, color: shu, letterSpacing: 2)),
+              const SizedBox(width: 10),
+              Text(stop.phase!.$2.toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: sumiSoft, letterSpacing: 1.4)),
+            ]),
+          ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+            SizedBox(width: 44, child: Center(child: Hanko(stop.numeral, size: 34, color: ai, turns: 0))),
+            const SizedBox(width: 10),
+            Expanded(
+              child: PaperCard(
+                color: stop.tint,
+                onTap: stop.onTap,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Row(children: [
+                  Icon(stop.icon, color: ai, size: 30),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(stop.title, style: const TextStyle(fontFamily: serifFont, fontSize: 20, fontWeight: FontWeight.w800, color: aiDeep)),
+                      const SizedBox(height: 2),
+                      Text(stop.subtitle, style: const TextStyle(fontSize: 15, color: sumiSoft, height: 1.3)),
+                    ]),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, color: sumiSoft),
+                ]),
+              ),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+/// The dotted road down the left edge, with a little plane gliding along it.
+class _JourneyLine extends CustomPainter {
+  final Animation<double> t;
+  _JourneyLine(this.t) : super(repaint: t);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const x = 22.0;
+    final dash = Paint()..color = ai.withValues(alpha: 0.28)..strokeWidth = 2.2..strokeCap = StrokeCap.round;
+    for (var y = 6.0; y < size.height - 6; y += 12) {
+      canvas.drawLine(Offset(x, y), Offset(x, y + 5), dash);
+    }
+    final y = 10 + t.value * (size.height - 40);
+    final edge = math.min(1.0, math.min(t.value * 8, (1 - t.value) * 8));
+    final tp = TextPainter(
+      text: TextSpan(text: String.fromCharCode(Icons.flight_rounded.codePoint), style: TextStyle(fontFamily: Icons.flight_rounded.fontFamily, package: Icons.flight_rounded.fontPackage, fontSize: 26, color: shuBright.withValues(alpha: edge))),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    canvas.save();
+    canvas.translate(x, y);
+    canvas.rotate(math.pi); // nose pointing down the path
+    tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _JourneyLine old) => false;
 }

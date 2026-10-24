@@ -8,11 +8,13 @@ class Profile {
   String lang;
   String seat;
   bool senior;
+  /// Less movement on screen: no drifting petals, no card flips.
+  bool calm;
   Set<String> needs;
   String server;
   String central;
   /// The seat comes from the booking and is never typed. Empty until the booking has been read.
-  Profile({this.lang = 'ta', this.seat = '', this.senior = false, Set<String>? needs, this.server = 'http://192.168.137.1:8000', this.central = 'http://192.168.137.1:8100'})
+  Profile({this.lang = 'ta', this.seat = '', this.senior = false, this.calm = false, Set<String>? needs, this.server = 'http://192.168.137.1:8000', this.central = 'http://192.168.137.1:8100'})
       : needs = needs ?? {};
 
   static Future<Profile> load() async {
@@ -21,6 +23,7 @@ class Profile {
       lang: p.getString('lang') ?? 'ta',
       seat: p.getString('seat') ?? '',
       senior: p.getBool('senior') ?? false,
+      calm: p.getBool('calm') ?? false,
       needs: (p.getStringList('needs') ?? []).toSet(),
       server: p.getString('server') ?? 'http://192.168.137.1:8000',
       central: p.getString('central') ?? 'http://192.168.137.1:8100',
@@ -32,6 +35,7 @@ class Profile {
     await p.setString('lang', lang);
     await p.setString('seat', seat);
     await p.setBool('senior', senior);
+    await p.setBool('calm', calm);
     await p.setStringList('needs', needs.toList());
     await p.setString('server', server);
     await p.setString('central', central);

@@ -6,11 +6,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
-import 'airport.dart' show navy, saffron;
+import 'theme.dart';
 import 'discover.dart';
 import 'kit.dart';
 import 'repo.dart';
-import 'theme.dart' show StatusBanner;
 
 /// Phase 2 and 3: the phone looks for the aircraft network by itself, boards with the signed pass from the booking
 /// (so the crew see the seat and preferences without anyone typing them), and opens the cabin app.
@@ -117,33 +116,39 @@ class _CabinScreenState extends State<CabinScreen> {
     }
     final s = status();
     final c = connection;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Join the cabin · 機内に接続'), backgroundColor: navy, foregroundColor: Colors.white),
-      body: ListView(padding: const EdgeInsets.all(14), children: [
+    return WashiPage(
+      title: 'On the aircraft',
+      kanji: '機内',
+      petals: false,
+      children: [
         StatusBanner(icon: s.icon, color: s.color, title: s.title, detail: s.detail, busy: searching),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         FilledButton.icon(
-          style: FilledButton.styleFrom(backgroundColor: saffron, foregroundColor: navy, minimumSize: const Size.fromHeight(56)),
+          style: FilledButton.styleFrom(backgroundColor: shuBright, minimumSize: const Size.fromHeight(60)),
           onPressed: c?.connected == true ? open : null,
-          icon: const Icon(Icons.flight),
+          icon: const Icon(Icons.flight_rounded),
           label: const Text('Open the cabin app', style: TextStyle(fontSize: 18)),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         OutlinedButton.icon(
           onPressed: c?.connected == true ? () => launchUrl(Uri.parse(p.cabinUrl()), mode: LaunchMode.externalApplication) : null,
-          icon: const Icon(Icons.open_in_browser),
+          icon: const Icon(Icons.open_in_browser_rounded),
           label: const Text('Open in the phone browser (use this for the microphone)'),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         TextButton(onPressed: searching ? null : search, child: const Text('Try again now')),
         if (c != null && !c.connected)
           TextButton(onPressed: () => setState(() => showManual = !showManual), child: Text(showManual ? 'Hide the address box' : 'Cabin not found? Enter the address from the crew')),
         if (showManual) TextField(controller: manualAddress, decoration: const InputDecoration(labelText: 'Cabin address', helperText: 'Shown by the crew under the QR code')),
-        const Divider(height: 32),
-        const Text('My profile QR (language, text size and needs, no name):'),
-        const SizedBox(height: 8),
-        Center(child: QrImageView(data: p.cabinUrl(), size: 220)),
-      ]),
+        const SizedBox(height: 18),
+        PaperCard(
+          child: Column(children: [
+            const Text('My profile QR · language, text size and needs, no name', textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: sumiSoft)),
+            const SizedBox(height: 12),
+            QrImageView(data: p.cabinUrl(), size: 210),
+          ]),
+        ),
+      ],
     );
   }
 }
