@@ -10,17 +10,20 @@ class Profile {
   bool senior;
   Set<String> needs;
   String server;
-  Profile({this.lang = 'ta', this.seat = '24C', this.senior = false, Set<String>? needs, this.server = 'http://192.168.137.1:8000'})
+  String central;
+  /// The seat comes from the booking and is never typed. Empty until the booking has been read.
+  Profile({this.lang = 'ta', this.seat = '', this.senior = false, Set<String>? needs, this.server = 'http://192.168.137.1:8000', this.central = 'http://192.168.137.1:8100'})
       : needs = needs ?? {};
 
   static Future<Profile> load() async {
     final p = await SharedPreferences.getInstance();
     return Profile(
       lang: p.getString('lang') ?? 'ta',
-      seat: p.getString('seat') ?? '24C',
+      seat: p.getString('seat') ?? '',
       senior: p.getBool('senior') ?? false,
       needs: (p.getStringList('needs') ?? []).toSet(),
       server: p.getString('server') ?? 'http://192.168.137.1:8000',
+      central: p.getString('central') ?? 'http://192.168.137.1:8100',
     );
   }
 
@@ -31,12 +34,14 @@ class Profile {
     await p.setBool('senior', senior);
     await p.setStringList('needs', needs.toList());
     await p.setString('server', server);
+    await p.setString('central', central);
   }
 
   /// Address of the cabin web app, with the profile in the URL fragment so it never reaches a server log.
   String cabinUrl() {
     final frag = 'lang=$lang&senior=${senior ? 1 : 0}&needs=${needs.join(',')}';
-    return '${server.replaceAll(RegExp(r'/+$'), '')}/p/?seat=$seat#$frag';
+    final query = seat.isEmpty ? '' : '?seat=$seat';
+    return '${server.replaceAll(RegExp(r'/+$'), '')}/p/$query#$frag';
   }
 }
 
