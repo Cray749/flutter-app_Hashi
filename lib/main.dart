@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,8 @@ import 'languages.dart';
 import 'overlays.dart';
 import 'preflight.dart';
 import 'repo.dart';
+import 'asrbench.dart';
+import 'selftest.dart';
 import 'session.dart';
 import 'settings.dart';
 import 'theme.dart';
@@ -21,6 +24,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Content.load();
   runApp(const HashiApp());
+  if (asrBenchEnabled) {
+    unawaited(runAsrBench());
+  } else if (selfTestEnabled) {
+    unawaited(runSelfTest());
+  }
 }
 
 class HashiApp extends StatelessWidget {
